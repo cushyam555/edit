@@ -29,8 +29,10 @@ from PySide6.QtWidgets import (
     QInputDialog,
     QMenu,
     QAbstractItemView,
+    QPlainTextEdit,
 )
 from .soundfont import SoundFont, export_sf2
+from .diagnostics import export_report
 from .gm import reference
 from .cache import read_presets
 from .piano import Piano
@@ -42,7 +44,7 @@ from .soundset import ordered, copy_entry, merge_entries, slot
 class Signals(QObject):
     scanned = Signal(object, object, object)
     loaded = Signal(object, str)
-    exported = Signal(str, str)
+    exported = Signal(str, str, object)
 
 
 class Window(QMainWindow):
@@ -54,6 +56,7 @@ class Window(QMainWindow):
         self.entries = []
         self.sources = set()
         self.pending = set()
+        self.last_export_report = None
         self.project = None
         self.destination_path = None
         self.destination_name = "New SoundFont.sf2"
@@ -92,7 +95,7 @@ class Window(QMainWindow):
         self.setCentralWidget(root)
         layout = QVBoxLayout(root)
         layout.setSpacing(12)
-        brand = QLabel("♫  SoundFont Edit Studio 0.2.3")
+        brand = QLabel("♫  SoundFont Edit Studio 0.2.4")
         brand.setStyleSheet("font-size:24px;font-weight:600;color:#087e73;padding:6px")
         toolbar = QHBoxLayout()
         layout.addLayout(toolbar)
@@ -113,6 +116,34 @@ class Window(QMainWindow):
         library_button.setMenu(menu)
         toolbar.addStretch()
         self.button(toolbar, "TH / EN", "TH / EN", self.language)
+        self.error_panel = QWidget()
+        error_layout = QVBoxLayout(self.error_panel)
+        self.error_panel.setStyleSheet("QWidget{background:#fff0eb;color:#7b251c}")
+        controls = QHBoxLayout()
+        error_layout.addLayout(controls)
+        heading = QLabel()
+        self.labels.append(
+            (
+                heading,
+                "บันทึก SF2 ไม่สำเร็จ — รายละเอียด",
+                "SF2 export failed — details",
+            )
+        )
+        controls.addWidget(heading)
+        controls.addStretch()
+        self.button(controls, "คัดลอกข้อผิดพลาด", "Copy error", self.copy_export_error)
+        self.button(
+            controls,
+            "บันทึกรายงานตรวจสอบ",
+            "Save diagnostic report",
+            self.save_export_report,
+        )
+        self.error_details = QPlainTextEdit()
+        self.error_details.setReadOnly(True)
+        self.error_details.setMaximumHeight(90)
+        error_layout.addWidget(self.error_details)
+        layout.addWidget(self.error_panel)
+        self.error_panel.hide()
         split = QSplitter()
         layout.addWidget(split, 1)
         source, sv = self.panel("ต้นทาง / Source SF2", "Source SF2")
@@ -313,7 +344,7 @@ class Window(QMainWindow):
 
     def update_title(self):
         self.setWindowTitle(
-            "SoundFont Edit Studio 0.2.3" + (" *" if self.dirty else "")
+            "SoundFont Edit Studio 0.2.4" + (" *" if self.dirty else "")
         )
 
     def busy(self):
@@ -1060,27 +1091,89 @@ class Window(QMainWindow):
         entries = [dict(e) for e in self.entries]
         self.statusBar().showMessage(self.text("กำลังบันทึก SF2…", "Writing SF2…"))
 
+        report_path = self.settings.parent / "last-export-error.json"
+
         def work():
             try:
                 export_sf2(entries, path)
-                self.signals.exported.emit(path, "")
+                self.signals.exported.emit(path, "", None)
             except Exception as exc:
-                self.signals.exported.emit(path, str(exc))
+                message = f"{type(exc).__name__}: {str(exc) or repr(exc)}"
+                try:
+                    report = export_report(entries, path, exc)
+                except Exception as diagnostic_error:
+                    report = {
+                        "error": message,
+                        "diagnostic_error": str(diagnostic_error),
+                        "contains_sample_audio": False,
+                    }
+                try:
+                    report_path.write_text(
+                        json.dumps(report, ensure_ascii=False, indent=2),
+                        encoding="utf-8",
+                    )
+                except OSError as report_error:
+                    report["report_save_error"] = str(report_error)
+                self.signals.exported.emit(path, message, report)
 
         self.executor.submit(work)
 
-    def export_done(self, path, error):
+    def export_done(self, path, error, report=None):
         self.exporting = False
         self.set_busy()
         if error:
-            self.error(error)
-            self.statusBar().showMessage(self.text("บันทึกไม่สำเร็จ", "Export failed"))
+            self.last_export_report = report or {
+                "error": error,
+                "contains_sample_audio": False,
+            }
+            self.error_details.setPlainText(f"File: {Path(path).name}\n{error}")
+            self.error_panel.show()
+            self.statusBar().showMessage(
+                self.text("บันทึกไม่สำเร็จ: ", "Export failed: ") + error
+            )
         else:
+            self.error_panel.hide()
+            self.last_export_report = None
             self.destination_name = Path(path).name
             self.dirty = False
             self.refresh_destination()
             self.update_title()
             self.statusBar().showMessage(self.text("บันทึกแล้ว: ", "Saved: ") + path)
+
+    def copy_export_error(self):
+        QApplication.clipboard().setText(self.error_details.toPlainText())
+
+    def save_export_report(self):
+        if self.last_export_report is None:
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            self.text(
+                "บันทึกรายงาน (ไม่มี sample เสียง)", "Save report (no sample audio)"
+            ),
+            "SoundFont-error-report.json",
+            "Diagnostic report (*.json)",
+        )
+        if not path:
+            return
+        if not Path(path).suffix:
+            path += ".json"
+        if Path(path).suffix.lower() != ".json":
+            self.error("Choose a .json report filename")
+            return
+        if str(Path(path).resolve()).casefold() in self.protected_paths():
+            self.error("Choose a new report filename")
+            return
+        try:
+            Path(path).write_text(
+                json.dumps(self.last_export_report, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            self.statusBar().showMessage(
+                self.text("บันทึกรายงานแล้ว: ", "Report saved: ") + path
+            )
+        except OSError as exc:
+            self.error(exc)
 
     def stop_sound(self):
         if self.player.synth:

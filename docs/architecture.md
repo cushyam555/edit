@@ -25,6 +25,9 @@
 - `soundfont_edit/gm.py`: 128 standard GM program references. Bank 128 is the
   SoundFont percussion bank; custom kit names remain unchanged.
 - `soundfont_edit/audio.py`: FluidSynth lifecycle and channel 10 percussion preview.
+- `soundfont_edit/diagnostics.py`: local failure reports with traceback and base64
+  PDTA metadata, source sizes and chosen entries. No PCM/sm24 audio is included.
+  Export failures render inline and remain copyable independently of modal dialogs.
 - `soundfont_edit/cache.py`: SQLite metadata cache, invalidated by size and
   nanosecond mtime; sample PCM is not stored in the database.
 - `soundfont_edit/piano.py`: two-octave keyboard with independent note on/off.

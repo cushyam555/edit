@@ -22,6 +22,7 @@ from soundfont_edit.app import Window
 from soundfont_edit.preset_tree import PresetTree, MIME
 from soundfont_edit.soundfont import SoundFont, export_sf2
 from test_soundfont import fixture
+from test_pruning import bank, zone
 
 
 class AppTests(unittest.TestCase):
@@ -279,6 +280,49 @@ class AppTests(unittest.TestCase):
             QTest.keyClick(editor, Qt.Key_Escape)
         finally:
             QLocale.setDefault(previous)
+
+    def test_export_failure_visible_and_metadata_report_saved(self):
+        w = self.window
+        source = self.folder / "bad.sf2"
+        target = self.folder / "failed.sf2"
+        bank(
+            source,
+            [[zone((41, 0))]],
+            [[zone((53, 5))]],
+            [dict(start=0, end=8)],
+            bytes(512 * 1024),
+        )
+        w.load_destination(str(source))
+        self.wait()
+        w.dirty = True
+        with (
+            patch.object(
+                QFileDialog, "getSaveFileName", return_value=(str(target), "")
+            ),
+            patch.object(QMessageBox, "question", return_value=QMessageBox.Yes),
+        ):
+            w.export()
+        self.wait()
+        self.assertFalse(target.exists())
+        self.assertTrue(w.error_panel.isVisible())
+        self.assertTrue(w.dirty)
+        self.assertIn("Invalid sample reference: 5", w.error_details.toPlainText())
+        self.assertIn("Invalid sample reference: 5", w.statusBar().currentMessage())
+        self.assertEqual(self.errors, [])
+        w.copy_export_error()
+        self.assertEqual(QApplication.clipboard().text(), w.error_details.toPlainText())
+        saved = self.folder / "report.json"
+        with patch.object(
+            QFileDialog, "getSaveFileName", return_value=(str(saved), "")
+        ):
+            w.save_export_report()
+        report = json.loads(saved.read_text("utf-8"))
+        self.assertFalse(report["contains_sample_audio"])
+        self.assertEqual(report["sources"][0]["sample_bytes"], 512 * 1024)
+        self.assertIn("shdr", report["sources"][0]["pdta"])
+        self.assertNotIn("smpl", report["sources"][0]["pdta"])
+        self.assertLess(saved.stat().st_size, 15000)
+        self.assertTrue((self.folder / "last-export-error.json").exists())
 
     def test_copy_edit_and_project_roundtrip(self):
         w = self.window

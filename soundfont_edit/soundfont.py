@@ -197,7 +197,9 @@ class ExportPlan:
                     continue
                 instrument = local[41]
                 if not 0 <= instrument < len(self.inst) - 1:
-                    raise ValueError("Invalid instrument reference")
+                    raise ValueError(
+                        f"Invalid instrument reference: {instrument}; instrument count={len(self.inst)-1}; preset index={index}"
+                    )
                 self.instrument_ids.add(instrument)
                 if instrument not in self.izones:
                     self.izones[instrument] = self.zones(instrument, False)
@@ -244,19 +246,25 @@ class ExportPlan:
         first = struct.unpack_from("<H", headers[index], offset)[0]
         last = struct.unpack_from("<H", headers[index + 1], offset)[0]
         if not 0 <= first <= last < len(bags):
-            raise ValueError("Invalid zone bag range")
+            raise ValueError(
+                f"Invalid zone bag range: {'preset' if preset else 'instrument'} index={index}; bags={first}..{last}; bag count={len(bags)}"
+            )
         result = []
         for b in range(first, last):
             g, m = struct.unpack("<HH", bags[b])
             ng, nm = struct.unpack("<HH", bags[b + 1])
             if not 0 <= g <= ng < len(gens) or not 0 <= m <= nm < len(mods) // 10:
-                raise ValueError("Invalid generator/modulator range")
+                raise ValueError(
+                    f"Invalid generator/modulator range: {'preset' if preset else 'instrument'} index={index}, bag={b}; generators={g}..{ng}/{len(gens)}; modulators={m}..{nm}/{len(mods)//10}"
+                )
             result.append((gens[g:ng], mods[m * 10 : nm * 10]))
         return result
 
     def sample_header(self, index):
         if not 0 <= index < len(self.shdr) - 1:
-            raise ValueError("Invalid sample reference")
+            raise ValueError(
+                f"Invalid sample reference: {index}; sample count={len(self.shdr)-1}"
+            )
         record = self.shdr[index]
         typ = struct.unpack_from("<H", record, 44)[0]
         if typ & 0x8000:
@@ -268,7 +276,9 @@ class ExportPlan:
             len(self.font.samples) % 2
             or not 0 <= start <= end <= len(self.font.samples) // 2
         ):
-            raise ValueError("Invalid sample PCM range")
+            raise ValueError(
+                f"Invalid sample PCM range: sample={index}; start={start}, end={end}; PCM points={len(self.font.samples)//2}"
+            )
         return record
 
     def use_sample(self, index, settings, preset):
@@ -302,7 +312,9 @@ class ExportPlan:
             or min(points) < 0
             or max(points) > len(self.font.samples) // 2
         ):
-            raise ValueError("Sample address offsets exceed source PCM data")
+            raise ValueError(
+                f"Sample address offsets exceed source PCM data: sample={index}; effective start={effective_start}, end={effective_end}; required bounds={min(points)}..{max(points)}; PCM points={len(self.font.samples)//2}"
+            )
         low, high = self.bounds.get(index, [min(points), max(points)])
         self.bounds[index] = [min(low, *points), max(high, *points)]
 
