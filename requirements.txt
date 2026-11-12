@@ -1,0 +1,4 @@
+PySide6>=6.8,<7
+pyfluidsynth>=1.3.4,<2
+mido>=1.3,<2
+python-rtmidi>=1.5,<2

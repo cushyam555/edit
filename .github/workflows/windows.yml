@@ -1,0 +1,38 @@
+name: Windows build
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt pyinstaller
+      - name: Download verified FluidSynth runtime
+        shell: pwsh
+        run: |
+          Invoke-WebRequest 'https://github.com/FluidSynth/fluidsynth/releases/download/v2.6.2/fluidsynth-v2.6.2-win10-x64-cpp11.zip' -OutFile fluid.zip
+          if ((Get-FileHash fluid.zip -Algorithm SHA256).Hash.ToLower() -ne '808295345d43c9c428f3fa87d29fbf97a9926f356df95559ff2689f3bd4072d7') { throw 'FluidSynth checksum mismatch' }
+          Expand-Archive fluid.zip -DestinationPath fluid
+          New-Item -ItemType Directory -Path vendor
+          Get-ChildItem fluid -Recurse -Filter *.dll | Copy-Item -Destination vendor
+      - name: Test core and GUI
+        run: python -m unittest discover -s tests -v
+        env:
+          QT_QPA_PLATFORM: offscreen
+      - name: Build portable application
+        run: pyinstaller --noconfirm --windowed --name SoundFont-Edit-Studio --add-binary "vendor/*.dll;vendor" --add-data "THIRD_PARTY.md;." --hidden-import mido.backends.rtmidi --hidden-import fluidsynth soundfont_edit_launcher.py
+      - name: Verify bundled application starts
+        shell: pwsh
+        run: |
+          $process = Start-Process 'dist/SoundFont-Edit-Studio/SoundFont-Edit-Studio.exe' -PassThru
+          Start-Sleep -Seconds 8
+          if ($process.HasExited) { throw "Application exited unexpectedly: $($process.ExitCode)" }
+          Stop-Process -Id $process.Id
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SoundFont-Edit-Studio-Windows
+          path: dist/SoundFont-Edit-Studio
