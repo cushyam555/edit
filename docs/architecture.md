@@ -1,26 +1,37 @@
 # Architecture
 
-- `soundfont_edit/app.py`: PySide6 desktop UI, background work, project JSON,
-  MIDI polling and FluidSynth playback. Library scans and exports share one worker
+- `soundfont_edit/app.py`: two-pane PySide6 UI, asynchronous file loading,
+  project JSON, MIDI polling and conflict dialogs. Library scans and exports share one worker
   to keep large file operations off the GUI thread.
 - `soundfont_edit/soundfont.py`: bounded RIFF chunk iteration, SoundFont preset
   metadata, SF2 merge/export. Preset bags are copied selectively; complete source
   instrument/sample pools are copied once per source and references are rebased.
   Outputs are written beside the destination, reopened for structural checking,
   then atomically replaced. Input SoundFonts are never opened for writing.
+- `soundfont_edit/preset_tree.py`: numeric tree ordering, display-only GM numbering,
+  multi-selection and window-local copy-only drag/drop. Leaf identifiers map back
+  to canonical entries rather than editable QVariant copies.
+- `soundfont_edit/soundset.py`: immutable merge planning, collision replacement or
+  remapping, atomic batch cancellation, and source preview address preservation.
+- `soundfont_edit/gm.py`: 128 standard GM program references. Bank 128 is the
+  SoundFont percussion bank; custom kit names remain unchanged.
+- `soundfont_edit/audio.py`: FluidSynth lifecycle and channel 10 percussion preview.
 - `soundfont_edit/cache.py`: SQLite metadata cache, invalidated by size and
   nanosecond mtime; sample PCM is not stored in the database.
 - `soundfont_edit/piano.py`: two-octave keyboard with independent note on/off.
 - `tests`: synthetic RIFF fixtures, reference/PCM checks across merged sources,
   independent FluidSynth loading, cache invalidation, and Qt project workflows.
 
-## Project v1
+## Project v2 (reads v1 too)
 
 UTF-8 JSON, extension `.sfedit`:
 
 ```json
 {
-  "version": 1,
+  "version": 2,
+  "destination_name": "My Band.sf2",
+  "destination_path": null,
+  "sources": ["Piano.sf2"],
   "entries": [
     {"path": "Piano.sf2", "index": 0, "name": "My Piano", "bank": 0,
      "program": 0, "source_bank": 0, "source_program": 0}
@@ -40,4 +51,4 @@ are never sent to a server. The app performs no network requests.
 ## Next phase
 
 Sample dependency pruning and deduplication, compressed SF3 decoding/export,
-full localization, undo/redo, and advanced sample/loop/envelope/filter editing.
+remaining localization, undo/redo, and advanced sample/loop/envelope/filter editing.

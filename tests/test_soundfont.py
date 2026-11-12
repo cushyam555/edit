@@ -5,10 +5,10 @@ from pathlib import Path
 from soundfont_edit.soundfont import SoundFont, export_sf2, chunk, name
 
 
-def fixture(path, title="Piano", sample=100):
+def fixture(path, title="Piano", sample=100, bank=0, program=0):
     tables = {
         b"phdr": name(title)
-        + struct.pack("<HHHIII", 0, 0, 0, 0, 0, 0)
+        + struct.pack("<HHHIII", program, bank, 0, 0, 0, 0)
         + name("EOP")
         + struct.pack("<HHHIII", 0, 0, 1, 0, 0, 0),
         b"pbag": struct.pack("<HHHH", 0, 0, 1, 0),
@@ -65,6 +65,28 @@ class Tests(unittest.TestCase):
             )
             p = SoundFont(roundtrip).presets[0]
             self.assertEqual((p.name, p.bank, p.program), ("Again", 3, 4))
+
+    def test_export_is_sorted_by_numeric_bank_and_id(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "source.sf2"
+            out = Path(d) / "out.sf2"
+            fixture(path)
+            entries = [
+                dict(
+                    path=str(path),
+                    index=0,
+                    name=f"{bank}-{program}",
+                    bank=bank,
+                    program=program,
+                )
+                for bank, program in [(128, 0), (0, 10), (2, 0), (0, 2)]
+            ]
+            export_sf2(entries, out)
+            self.assertEqual(
+                [(p.bank, p.program) for p in SoundFont(out).presets],
+                [(0, 2), (0, 10), (2, 0), (128, 0)],
+            )
+            self.assertEqual(entries[0]["bank"], 128)
 
     def test_guards(self):
         with tempfile.TemporaryDirectory() as d:

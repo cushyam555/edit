@@ -96,6 +96,7 @@ def export_sf2(entries, destination):
     Keeping the complete source instrument pool preserves global zones, modulators,
     stereo sample links and shared samples without a lossy dependency traversal.
     """
+    entries = sorted(entries, key=lambda e: (int(e["bank"]), int(e["program"])))
     if not entries:
         raise ValueError("The sound set is empty")
     seen = set()
