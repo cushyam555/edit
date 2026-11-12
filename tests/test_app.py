@@ -81,7 +81,11 @@ class AppTests(unittest.TestCase):
         tree.editItem(tree.rows[0], column)
         self.app.processEvents()
         kind = QLineEdit if column == 1 else QSpinBox
-        return next(editor for editor in tree.findChildren(kind) if editor.isVisible())
+        editor = next(
+            editor for editor in tree.findChildren(kind) if editor.isVisible()
+        )
+        self.assertGreaterEqual(editor.width(), editor.sizeHint().width())
+        return editor
 
     def test_inline_name_paste_escape_and_immediate_save(self):
         w = self.window

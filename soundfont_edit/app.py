@@ -1179,6 +1179,7 @@ class Window(QMainWindow):
             event.ignore()
             return
         self.timer.stop()
+        self.destination_refresh_timer.stop()
         if self.midiport:
             self.midiport.close()
         self.player.close()

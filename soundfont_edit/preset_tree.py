@@ -8,6 +8,7 @@ from PySide6.QtCore import (
     QPersistentModelIndex,
     QModelIndex,
     QEvent,
+    QRect,
 )
 from PySide6.QtGui import QDrag, QKeySequence
 from PySide6.QtWidgets import (
@@ -72,6 +73,16 @@ class PresetDelegate(QStyledItemDelegate):
             value = entry["program"] if index.column() == 0 else entry["bank"]
             editor.setValue(value + (editor.property("numbering_offset") or 0))
             editor.selectAll()
+
+    def updateEditorGeometry(self, editor, option, index):
+        # Indentation leaves very little space in the first tree column.
+        # Let the temporary editor overlap the next cell rather than clip digits.
+        rect = QRect(option.rect)
+        hint = editor.sizeHint()
+        rect.setWidth(max(rect.width(), hint.width()))
+        rect.setHeight(max(rect.height(), hint.height()))
+        rect.moveTop(option.rect.center().y() - rect.height() // 2)
+        editor.setGeometry(rect)
 
     def setModelData(self, editor, model, index):
         if self.parent().inline_editor is not editor:
