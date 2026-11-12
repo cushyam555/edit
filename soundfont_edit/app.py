@@ -95,7 +95,7 @@ class Window(QMainWindow):
         self.setCentralWidget(root)
         layout = QVBoxLayout(root)
         layout.setSpacing(12)
-        brand = QLabel("♫  SoundFont Edit Studio 0.2.4")
+        brand = QLabel("♫  SoundFont Edit Studio 0.2.5")
         brand.setStyleSheet("font-size:24px;font-weight:600;color:#087e73;padding:6px")
         toolbar = QHBoxLayout()
         layout.addLayout(toolbar)
@@ -206,6 +206,11 @@ class Window(QMainWindow):
         self.destination_tree.dropped.connect(self.drop_source)
         self.destination_count = QLabel()
         dv.addWidget(self.destination_count)
+        self.export_notice = QLabel()
+        self.export_notice.setWordWrap(True)
+        self.export_notice.setStyleSheet("background:#fff2cd;color:#6f4b00;padding:6px")
+        dv.addWidget(self.export_notice)
+        self.export_notice.hide()
         controls = QHBoxLayout()
         dv.addLayout(controls)
         controls.addStretch()
@@ -344,7 +349,7 @@ class Window(QMainWindow):
 
     def update_title(self):
         self.setWindowTitle(
-            "SoundFont Edit Studio 0.2.4" + (" *" if self.dirty else "")
+            "SoundFont Edit Studio 0.2.5" + (" *" if self.dirty else "")
         )
 
     def busy(self):
@@ -780,6 +785,7 @@ class Window(QMainWindow):
             self.changed()
 
     def changed(self, defer_refresh=False):
+        self.export_notice.hide()
         self.entries = ordered(self.entries)
         self.dirty = True
         if defer_refresh:
@@ -813,6 +819,7 @@ class Window(QMainWindow):
         self.project = None
         self.destination_path = None
         self.destination_name = "New SoundFont.sf2"
+        self.export_notice.hide()
         self.dirty = False
         self.active = None
         self.active_side = None
@@ -877,6 +884,7 @@ class Window(QMainWindow):
     def load_done(self, data, error):
         self.loading = False
         self.set_busy()
+        self.export_notice.hide()
         if error:
             self.error(error)
             return
@@ -1095,8 +1103,8 @@ class Window(QMainWindow):
 
         def work():
             try:
-                export_sf2(entries, path)
-                self.signals.exported.emit(path, "", None)
+                stats = export_sf2(entries, path)
+                self.signals.exported.emit(path, "", stats)
             except Exception as exc:
                 message = f"{type(exc).__name__}: {str(exc) or repr(exc)}"
                 try:
@@ -1122,6 +1130,7 @@ class Window(QMainWindow):
         self.exporting = False
         self.set_busy()
         if error:
+            self.export_notice.hide()
             self.last_export_report = report or {
                 "error": error,
                 "contains_sample_audio": False,
@@ -1134,6 +1143,27 @@ class Window(QMainWindow):
         else:
             self.error_panel.hide()
             self.last_export_report = None
+            repairs = (
+                report.get("stereo_link_repairs", [])
+                if isinstance(report, dict)
+                else []
+            )
+            if repairs:
+                self.export_notice.setText(
+                    self.text(
+                        f"บันทึกสำเร็จ · ซ่อมลิงก์สเตอริโอ {len(repairs)} คู่ในไฟล์ใหม่",
+                        f"Saved · repaired {len(repairs)} stereo links in the new file",
+                    )
+                )
+                self.export_notice.setToolTip(
+                    "\n".join(
+                        f"{item['source']}: {item['sample_ids']} ← {item['original_links']}"
+                        for item in repairs
+                    )
+                )
+                self.export_notice.show()
+            else:
+                self.export_notice.hide()
             self.destination_name = Path(path).name
             self.dirty = False
             self.refresh_destination()

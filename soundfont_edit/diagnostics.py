@@ -6,7 +6,7 @@ import traceback
 from pathlib import Path
 from .soundfont import SoundFont
 
-VERSION = "0.2.4"
+VERSION = "0.2.5"
 
 
 def export_report(entries, destination, exception):

@@ -46,7 +46,7 @@ def bank(path, presets, instruments, samples, pcm):
         tables[mod] += bytes(10)
     tables[b"shdr"] = (
         b"".join(
-            name(f"Sample{i}")
+            name(s.get("name", f"Sample{i}"))
             + struct.pack(
                 "<IIIIIBbHH",
                 s["start"],
@@ -239,6 +239,63 @@ class PruningTests(unittest.TestCase):
             export_sf2([entry(self.source, 0)], self.output)
         self.assertEqual(self.output.read_bytes(), b"previous output")
         self.assertEqual(list(self.folder.glob("*.tmp")), [])
+
+    def broken_pair(
+        self, valid=False, ambiguous=False, partner_link=None, mismatch=False
+    ):
+        pcm = struct.pack("<440h", *range(440))
+        samples = [
+            dict(name="Unused", start=0, end=64),
+            dict(
+                name="Note_A_(R", start=110, end=174, link=3 if valid else 2025, type=4
+            ),
+            dict(name="Other", start=220, end=284),
+            dict(
+                name="Note_A_(L", start=330, end=394, link=1 if valid else 2025, type=2
+            ),
+        ]
+        if partner_link is not None:
+            samples[3]["link"] = partner_link
+        if mismatch:
+            samples[3]["end"] += 1
+        if ambiguous:
+            samples.append(dict(samples[3]))
+        bank(self.source, [[zone((41, 0))]], [[zone((53, 1))]], samples, pcm)
+
+    def test_repairs_only_unique_matching_stereo_links(self):
+        self.broken_pair()
+        before = self.source.read_bytes()
+        stats = export_sf2([entry(self.source, 0)], self.output)
+        font = SoundFont(self.output)
+        self.assertEqual(len(stats["stereo_link_repairs"]), 1)
+        self.assertEqual(stats["stereo_link_repairs"][0]["sample_ids"], [1, 3])
+        records = font.records(b"shdr", 46)
+        self.assertEqual(struct.unpack_from("<HH", records[0], 42), (1, 4))
+        self.assertEqual(struct.unpack_from("<HH", records[1], 42), (0, 2))
+        self.assertEqual(self.source.read_bytes(), before)
+        repaired = self.output.read_bytes()
+        self.broken_pair(valid=True)
+        reference = self.folder / "reference.sf2"
+        stats = export_sf2([entry(self.source, 0)], reference)
+        self.assertEqual(stats["stereo_link_repairs"], [])
+        self.assertEqual(repaired, reference.read_bytes())
+
+    def test_stereo_repair_requires_matching_geometry_and_no_existing_partner(self):
+        for options in ({"partner_link": 0}, {"mismatch": True}):
+            with self.subTest(options=options):
+                self.broken_pair(**options)
+                with self.assertRaisesRegex(
+                    ValueError, "no unique matching L/R partner"
+                ):
+                    export_sf2([entry(self.source, 0)], self.output)
+                self.assertFalse(self.output.exists())
+
+    def test_ambiguous_stereo_partner_is_not_guessed(self):
+        self.broken_pair(ambiguous=True)
+        self.output.write_bytes(b"keep previous")
+        with self.assertRaisesRegex(ValueError, "no unique matching L/R partner"):
+            export_sf2([entry(self.source, 0)], self.output)
+        self.assertEqual(self.output.read_bytes(), b"keep previous")
 
     def test_large_unused_pcm_is_not_loaded_or_copied(self):
         bank(

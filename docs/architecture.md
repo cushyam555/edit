@@ -10,7 +10,11 @@
   intervals with guard points, remapping sample IDs, instrument IDs and addresses.
   Metadata reads seek past PCM; final writes stream 1 MiB blocks from each source.
   Shared headers and overlapping audio ranges within a source are emitted once.
-  Source size/mtime are checked before and after copying.
+  Source size/mtime are checked before and after copying. Out-of-range stereo
+  links may be repaired only when complementary L/R names and types, length,
+  relative loops, rate and pitch uniquely agree in both directions. Existing
+  valid partners are never detached. Repairs are returned as export statistics
+  and disclosed by an inline success notice; ambiguous links remain errors.
   Outputs are written beside the destination, reopened for structural checking,
   then atomically replaced. Input SoundFonts are never opened for writing.
 - `soundfont_edit/preset_tree.py`: numeric tree ordering, display-only GM numbering,

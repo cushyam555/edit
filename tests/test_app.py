@@ -324,6 +324,40 @@ class AppTests(unittest.TestCase):
         self.assertLess(saved.stat().st_size, 15000)
         self.assertTrue((self.folder / "last-export-error.json").exists())
 
+    def test_repaired_export_succeeds_and_reports_stereo_repair(self):
+        w = self.window
+        source = self.folder / "stereo.sf2"
+        target = self.folder / "saved.sf2"
+        samples = [
+            dict(name="Note(R)", start=0, end=64, type=4, link=2025),
+            dict(name="Note(L)", start=110, end=174, type=2, link=2025),
+        ]
+        bank(
+            source,
+            [[zone((41, 0))]],
+            [[zone((53, 0)), zone((53, 1))]],
+            samples,
+            bytes(440),
+        )
+        original = source.read_bytes()
+        w.load_destination(str(source))
+        self.wait()
+        with (
+            patch.object(
+                QFileDialog, "getSaveFileName", return_value=(str(target), "")
+            ),
+            patch.object(QMessageBox, "question", return_value=QMessageBox.Yes),
+        ):
+            w.export()
+        self.wait()
+        self.assertTrue(target.exists())
+        self.assertFalse(w.error_panel.isVisible())
+        self.assertTrue(w.export_notice.isVisible())
+        self.assertIn("1", w.export_notice.text())
+        self.assertFalse(w.dirty)
+        self.assertEqual(source.read_bytes(), original)
+        self.assertEqual(self.errors, [])
+
     def test_copy_edit_and_project_roundtrip(self):
         w = self.window
         path = self.add_fixture()

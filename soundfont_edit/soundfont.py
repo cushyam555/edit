@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from pathlib import Path
 import os
+import re
 import struct
 import tempfile
 from bisect import bisect_right
@@ -186,6 +187,8 @@ class ExportPlan:
         self.bounds = {}
         self.looped = set()
         self.instrument_ids = set()
+        self.sample_links = {}
+        self.link_repairs = []
         for index in sorted(indices):
             zones = self.zones(index, True)
             self.pzones[index] = zones
@@ -219,6 +222,7 @@ class ExportPlan:
             record = self.sample_header(sample)
             link, typ = struct.unpack_from("<HH", record, 42)
             if typ & 14:
+                link = self.resolve_link(sample)
                 self.sample_header(link)
                 if link not in self.bounds:
                     start, end = struct.unpack_from("<II", self.shdr[link], 20)
@@ -234,6 +238,84 @@ class ExportPlan:
         self.instrument_map = {}
         self.sample_map = {}
         self.deltas = {}
+
+    def stereo_identity(self, index):
+        record = self.shdr[index]
+        title = record[:20].split(b"\0")[0].decode("latin1").strip()
+        marker = re.search(r"\(([LR])\)?$", title, re.IGNORECASE)
+        if marker is None:
+            return None
+        start, end, ls, le, rate, pitch, correction, link, typ = struct.unpack_from(
+            "<IIIIIBbHH", record, 20
+        )
+        if typ not in (2, 4):
+            return None
+        return (
+            (
+                title[: marker.start()].casefold(),
+                end - start,
+                ls - start,
+                le - start,
+                rate,
+                pitch,
+                correction,
+            ),
+            marker[1].upper(),
+            typ,
+        )
+
+    def stereo_candidates(self, index):
+        identity = self.stereo_identity(index)
+        if identity is None:
+            return []
+        signature, side, typ = identity
+        other_side = "L" if side == "R" else "R"
+        other_type = 4 if typ == 2 else 2
+        candidates = []
+        for other in range(len(self.shdr) - 1):
+            if other == index or self.stereo_identity(other) != (
+                signature,
+                other_side,
+                other_type,
+            ):
+                continue
+            partner_link = struct.unpack_from("<H", self.shdr[other], 42)[0]
+            # Never detach a sample that already points to a different valid partner.
+            if partner_link == index or partner_link >= len(self.shdr) - 1:
+                candidates.append(other)
+        return candidates
+
+    def resolve_link(self, index):
+        if index in self.sample_links:
+            return self.sample_links[index]
+        original = struct.unpack_from("<H", self.shdr[index], 42)[0]
+        if 0 <= original < len(self.shdr) - 1:
+            self.sample_links[index] = original
+            return original
+        candidates = self.stereo_candidates(index)
+        if len(candidates) == 1 and self.stereo_candidates(candidates[0]) == [index]:
+            partner = candidates[0]
+            self.sample_header(partner)
+            self.sample_links[index] = partner
+            self.sample_links[partner] = index
+            self.link_repairs.append(
+                {
+                    "source": self.font.path.name,
+                    "sample_ids": [index, partner],
+                    "original_links": [
+                        original,
+                        struct.unpack_from("<H", self.shdr[partner], 42)[0],
+                    ],
+                    "sample_names": [
+                        self.shdr[i][:20].split(b"\0")[0].decode("latin1")
+                        for i in (index, partner)
+                    ],
+                }
+            )
+            return partner
+        raise ValueError(
+            f"Broken stereo sample link: sample={index}, link={original}, sample count={len(self.shdr)-1}; no unique matching L/R partner. Original audio was not discarded."
+        )
 
     def zones(self, index, preset):
         headers = self.phdr if preset else self.inst
@@ -432,7 +514,12 @@ def export_sf2(entries, destination):
                     )[0]
                 struct.pack_into("<I", record, pos, value + delta)
             link, typ = struct.unpack_from("<HH", record, 42)
-            struct.pack_into("<H", record, 42, plan.sample_map[link] if typ & 14 else 0)
+            struct.pack_into(
+                "<H",
+                record,
+                42,
+                plan.sample_map[plan.sample_links[index]] if typ & 14 else 0,
+            )
             out[b"shdr"] += record
     for entry in entries:
         plan = plans[str(Path(entry["path"]).resolve())]
@@ -504,4 +591,7 @@ def export_sf2(entries, destination):
         instruments=instrument_cursor,
         samples=sample_cursor,
         bytes=destination.stat().st_size,
+        stereo_link_repairs=[
+            repair for plan in plans.values() for repair in plan.link_repairs
+        ],
     )
