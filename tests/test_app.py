@@ -358,6 +358,34 @@ class AppTests(unittest.TestCase):
         self.assertEqual(source.read_bytes(), original)
         self.assertEqual(self.errors, [])
 
+    def test_reversed_zone_export_succeeds_with_visible_warning(self):
+        w = self.window
+        source = self.folder / "offset.sf2"
+        target = self.folder / "saved.sf2"
+        bank(
+            source,
+            [[zone((41, 0))]],
+            [[zone((0, 15), (53, 0))]],
+            [dict(start=100, end=110)],
+            bytes(400),
+        )
+        w.load_destination(str(source))
+        self.wait()
+        with (
+            patch.object(
+                QFileDialog, "getSaveFileName", return_value=(str(target), "")
+            ),
+            patch.object(QMessageBox, "question", return_value=QMessageBox.Yes),
+        ):
+            w.export()
+        self.wait()
+        self.assertTrue(target.exists())
+        self.assertFalse(w.error_panel.isVisible())
+        self.assertTrue(w.export_notice.isVisible())
+        self.assertIn("zone", w.export_notice.text())
+        self.assertIn("preserved", w.export_notice.toolTip())
+        self.assertEqual(self.errors, [])
+
     def test_copy_edit_and_project_roundtrip(self):
         w = self.window
         path = self.add_fixture()

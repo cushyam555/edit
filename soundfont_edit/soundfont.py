@@ -189,7 +189,10 @@ class ExportPlan:
         self.instrument_ids = set()
         self.sample_links = {}
         self.link_repairs = []
+        self.source_zone_warnings = []
+        self.warning_keys = set()
         for index in sorted(indices):
+            self.current_preset = index
             zones = self.zones(index, True)
             self.pzones[index] = zones
             global_gen = {}
@@ -389,14 +392,29 @@ class ExportPlan:
                     loop_end + amount(3, 50),
                 ]
             )
-        if (
-            effective_end < effective_start
-            or min(points) < 0
-            or max(points) > len(self.font.samples) // 2
-        ):
+        if min(points) < 0 or max(points) > len(self.font.samples) // 2:
             raise ValueError(
                 f"Sample address offsets exceed source PCM data: sample={index}; effective start={effective_start}, end={effective_end}; required bounds={min(points)}..{max(points)}; PCM points={len(self.font.samples)//2}"
             )
+        if effective_end < effective_start:
+            key = (self.current_preset, index, effective_start, effective_end)
+            if key not in self.warning_keys:
+                self.warning_keys.add(key)
+                program, bank = struct.unpack_from(
+                    "<HH", self.phdr[self.current_preset], 20
+                )
+                self.source_zone_warnings.append(
+                    {
+                        "source": self.font.path.name,
+                        "preset_index": self.current_preset,
+                        "bank": bank,
+                        "program": program,
+                        "sample_id": index,
+                        "effective_start": effective_start,
+                        "effective_end": effective_end,
+                        "action": "preserved original offsets and PCM; no zone was removed",
+                    }
+                )
         low, high = self.bounds.get(index, [min(points), max(points)])
         self.bounds[index] = [min(low, *points), max(high, *points)]
 
@@ -593,5 +611,8 @@ def export_sf2(entries, destination):
         bytes=destination.stat().st_size,
         stereo_link_repairs=[
             repair for plan in plans.values() for repair in plan.link_repairs
+        ],
+        source_zone_warnings=[
+            warning for plan in plans.values() for warning in plan.source_zone_warnings
         ],
     )

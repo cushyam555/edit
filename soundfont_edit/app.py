@@ -95,7 +95,7 @@ class Window(QMainWindow):
         self.setCentralWidget(root)
         layout = QVBoxLayout(root)
         layout.setSpacing(12)
-        brand = QLabel("♫  SoundFont Edit Studio 0.2.5")
+        brand = QLabel("♫  SoundFont Edit Studio 0.2.6")
         brand.setStyleSheet("font-size:24px;font-weight:600;color:#087e73;padding:6px")
         toolbar = QHBoxLayout()
         layout.addLayout(toolbar)
@@ -349,7 +349,7 @@ class Window(QMainWindow):
 
     def update_title(self):
         self.setWindowTitle(
-            "SoundFont Edit Studio 0.2.5" + (" *" if self.dirty else "")
+            "SoundFont Edit Studio 0.2.6" + (" *" if self.dirty else "")
         )
 
     def busy(self):
@@ -1148,19 +1148,40 @@ class Window(QMainWindow):
                 if isinstance(report, dict)
                 else []
             )
+            warnings = (
+                report.get("source_zone_warnings", [])
+                if isinstance(report, dict)
+                else []
+            )
+            notices = []
+            details = []
             if repairs:
-                self.export_notice.setText(
+                notices.append(
                     self.text(
-                        f"บันทึกสำเร็จ · ซ่อมลิงก์สเตอริโอ {len(repairs)} คู่ในไฟล์ใหม่",
-                        f"Saved · repaired {len(repairs)} stereo links in the new file",
+                        f"ซ่อมลิงก์สเตอริโอ {len(repairs)} คู่",
+                        f"repaired {len(repairs)} stereo links",
                     )
                 )
-                self.export_notice.setToolTip(
-                    "\n".join(
-                        f"{item['source']}: {item['sample_ids']} ← {item['original_links']}"
-                        for item in repairs
+                details.extend(
+                    f"{item['source']}: {item['sample_ids']} ← {item['original_links']}"
+                    for item in repairs
+                )
+            if warnings:
+                notices.append(
+                    self.text(
+                        f"คงค่า zone ต้นฉบับที่ควรตรวจสอบ {len(warnings)} รายการ",
+                        f"preserved {len(warnings)} source zones needing review",
                     )
                 )
+                details.extend(
+                    f"{item['source']}: Bank {item['bank']} / ID {item['program']}, sample {item['sample_id']}, start {item['effective_start']} > end {item['effective_end']} (preserved)"
+                    for item in warnings
+                )
+            if notices:
+                self.export_notice.setText(
+                    self.text("บันทึกสำเร็จ · ", "Saved · ") + " · ".join(notices)
+                )
+                self.export_notice.setToolTip("\n".join(details))
                 self.export_notice.show()
             else:
                 self.export_notice.hide()

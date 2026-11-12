@@ -199,6 +199,37 @@ class PruningTests(unittest.TestCase):
             [(0, 65533), (1, 2), (54, 1), (0, 65534), (53, 0)],
         )
 
+    def test_reversed_source_zone_preserved_with_warning(self):
+        pcm = struct.pack("<200h", *range(200))
+        bank(
+            self.source,
+            [[zone((41, 0))]],
+            [[zone((0, 15), (53, 0))]],
+            [dict(start=100, end=110)],
+            pcm,
+        )
+        stats = export_sf2([entry(self.source, 0)], self.output)
+        font = SoundFont(self.output)
+        self.assertEqual(len(stats["source_zone_warnings"]), 1)
+        self.assertEqual(font.samples[:30], pcm[200:230])
+        self.assertEqual(struct.unpack_from("<II", font.tables[b"shdr"], 20), (0, 10))
+        self.assertIn((0, 15), list(struct.iter_unpack("<HH", font.tables[b"igen"])))
+        again = self.folder / "again.sf2"
+        export_sf2([entry(self.output, 0)], again)
+        self.assertEqual(self.output.read_bytes(), again.read_bytes())
+
+    def test_offsets_outside_available_pcm_still_fail(self):
+        bank(
+            self.source,
+            [[zone((41, 0))]],
+            [[zone((0, 1000), (53, 0))]],
+            [dict(start=0, end=10)],
+            bytes(112),
+        )
+        with self.assertRaisesRegex(ValueError, "exceed source PCM data"):
+            export_sf2([entry(self.source, 0)], self.output)
+        self.assertFalse(self.output.exists())
+
     def test_coarse_offsets_preserve_access_before_nominal_start(self):
         pcm = bytes(70000)
         bank(

@@ -15,6 +15,10 @@
   relative loops, rate and pitch uniquely agree in both directions. Existing
   valid partners are never detached. Repairs are returned as export statistics
   and disclosed by an inline success notice; ambiguous links remain errors.
+  Reversed effective spans already present in a source zone are preserved with
+  an explicit warning if all addressed points exist in PCM. Negative/out-of-file
+  addresses remain hard errors. This preserves player behavior rather than
+  guessing a correction or dropping a source voice.
   Outputs are written beside the destination, reopened for structural checking,
   then atomically replaced. Input SoundFonts are never opened for writing.
 - `soundfont_edit/preset_tree.py`: numeric tree ordering, display-only GM numbering,
