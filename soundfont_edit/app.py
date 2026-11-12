@@ -28,8 +28,10 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QInputDialog,
     QMenu,
+    QAbstractItemView,
 )
 from .soundfont import SoundFont, export_sf2
+from .gm import reference
 from .cache import read_presets
 from .piano import Piano
 from .audio import Player
@@ -81,12 +83,15 @@ class Window(QMainWindow):
             self.meta = {}
         self.meta.setdefault("favorites", [])
         self.meta.setdefault("tags", {})
+        self.destination_refresh_timer = QTimer(self)
+        self.destination_refresh_timer.setSingleShot(True)
+        self.destination_refresh_timer.timeout.connect(self.refresh_destination)
         self.token = uuid.uuid4().hex
         root = QWidget()
         self.setCentralWidget(root)
         layout = QVBoxLayout(root)
         layout.setSpacing(12)
-        brand = QLabel("♫  SoundFont Edit Studio 0.2")
+        brand = QLabel("♫  SoundFont Edit Studio 0.2.1")
         brand.setStyleSheet("font-size:24px;font-weight:600;color:#087e73;padding:6px")
         toolbar = QHBoxLayout()
         layout.addLayout(toolbar)
@@ -161,8 +166,10 @@ class Window(QMainWindow):
         self.destination_tree.itemSelectionChanged.connect(
             lambda: self.select("destination")
         )
-        self.destination_tree.itemDoubleClicked.connect(
-            lambda item, col: self.preview() if item.data(0, ROLE) else None
+        self.destination_tree.edited.connect(self.edit_destination_cell)
+        self.destination_tree.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.destination_tree.customContextMenuRequested.connect(
+            self.destination_context
         )
         self.destination_tree.dropped.connect(self.drop_source)
         self.destination_count = QLabel()
@@ -312,7 +319,9 @@ class Window(QMainWindow):
         self.update_audition()
 
     def update_title(self):
-        self.setWindowTitle("SoundFont Edit Studio 0.2" + (" *" if self.dirty else ""))
+        self.setWindowTitle(
+            "SoundFont Edit Studio 0.2.1" + (" *" if self.dirty else "")
+        )
 
     def busy(self):
         return self.loading or self.exporting
@@ -436,6 +445,9 @@ class Window(QMainWindow):
         self.reconcile_active("source")
 
     def refresh_destination(self):
+        if self.destination_tree.state() == QAbstractItemView.EditingState:
+            self.destination_refresh_timer.start(25)
+            return
         self.destination_tree.populate(
             self.entries,
             self.destination_search.text(),
@@ -444,8 +456,8 @@ class Window(QMainWindow):
         )
         self.destination_count.setText(
             self.text(
-                f"{len(self.entries)} เสียงในปลายทาง · แสดง {len(self.destination_tree.rows)}",
-                f"{len(self.entries)} destination presets · {len(self.destination_tree.rows)} shown",
+                f"{len(self.destination_tree.rows)}/{len(self.entries)} เสียง · ดับเบิลคลิกชื่อ / ID / Bank เพื่อแก้",
+                f"{len(self.destination_tree.rows)}/{len(self.entries)} presets · Double-click name / ID / Bank to edit",
             )
         )
         duplicates = len({slot(e) for e in self.entries}) != len(self.entries)
@@ -493,10 +505,79 @@ class Window(QMainWindow):
             return
         menu = QMenu(self)
         menu.addAction(
+            self.text("คัดลอกชื่อ GM", "Copy GM name"), self.source_tree.copy_gm
+        )
+        menu.addAction(
             self.text("เพิ่ม/ลบรายการโปรด ☆", "Toggle favorite ☆"), self.favorite
         )
         menu.addAction(self.text("แก้ไขแท็ก", "Edit tags"), self.edit_tags)
         menu.exec(self.source_tree.viewport().mapToGlobal(pos))
+
+    def destination_context(self, pos):
+        if not self.destination_tree.selected_entries():
+            return
+        menu = QMenu(self)
+        menu.addAction(
+            self.text("คัดลอกชื่อ GM", "Copy GM name"), self.destination_tree.copy_gm
+        )
+        use = menu.addAction(
+            self.text("ใช้ชื่อ GM เป็นชื่อ preset", "Use GM name as preset name"),
+            self.use_gm_names,
+        )
+        use.setEnabled(not self.busy())
+        menu.exec(self.destination_tree.viewport().mapToGlobal(pos))
+
+    def use_gm_names(self):
+        self.destination_tree.finish_edit()
+        if self.busy():
+            return
+        changed = False
+        for entry in self.destination_tree.selected_entries():
+            value = reference(entry)
+            if value != "—" and value != entry["name"]:
+                entry["name"] = value
+                changed = True
+        if changed:
+            self.changed()
+
+    def edit_destination_cell(self, key, column, value):
+        if self.busy():
+            return
+        entry = next((e for e in self.entries if e.get("_uid") == key), None)
+        if entry is None:
+            return
+        try:
+            if column == 1:
+                name = str(value).strip()
+                if not name:
+                    raise ValueError(
+                        self.text(
+                            "ชื่อ preset ต้องไม่ว่าง", "Preset name cannot be empty"
+                        )
+                    )
+                if entry["name"] != name:
+                    entry["name"] = name
+                    self.changed(defer_refresh=True)
+                return
+            if column not in (0, 2):
+                return
+            value = int(value)
+            if not 0 <= value <= (127 if column == 0 else 128):
+                raise ValueError("ID: 0–127 / Bank: 0–128")
+            field = "program" if column == 0 else "bank"
+            if entry[field] == value:
+                return
+            candidate = dict(entry, **{field: value})
+            result = merge_entries(
+                [e for e in self.entries if e is not entry],
+                [candidate],
+                self.resolve_collision,
+            )
+            if result is not None:
+                self.entries = result
+                self.changed(defer_refresh=True)
+        except (TypeError, ValueError) as exc:
+            self.error(exc)
 
     def set_favorites_filter(self, checked):
         self.only_favorites = checked
@@ -540,6 +621,7 @@ class Window(QMainWindow):
         self.copy_to_destination(entries)
 
     def copy_to_destination(self, entries):
+        self.destination_tree.finish_edit()
         if self.busy() or not entries:
             return
         incoming = [dict(copy_entry(e), _uid=uuid.uuid4().hex) for e in entries]
@@ -625,6 +707,7 @@ class Window(QMainWindow):
         )
 
     def rename(self):
+        self.destination_tree.finish_edit()
         selected = self.destination_tree.selected_entries()
         if self.busy() or len(selected) != 1:
             return
@@ -640,6 +723,7 @@ class Window(QMainWindow):
             self.changed()
 
     def change_slot(self):
+        self.destination_tree.finish_edit()
         selected = self.destination_tree.selected_entries()
         if self.busy() or len(selected) != 1:
             return
@@ -651,6 +735,7 @@ class Window(QMainWindow):
             self.changed()
 
     def remove(self):
+        self.destination_tree.finish_edit()
         if self.busy():
             return
         selected = {e["_uid"] for e in self.destination_tree.selected_entries()}
@@ -658,10 +743,13 @@ class Window(QMainWindow):
             self.entries = [e for e in self.entries if e["_uid"] not in selected]
             self.changed()
 
-    def changed(self):
+    def changed(self, defer_refresh=False):
         self.entries = ordered(self.entries)
         self.dirty = True
-        self.refresh_destination()
+        if defer_refresh:
+            self.destination_refresh_timer.start(0)
+        else:
+            self.refresh_destination()
         self.update_title()
 
     def may_discard(self):
@@ -681,6 +769,7 @@ class Window(QMainWindow):
         )
 
     def new_destination(self):
+        self.destination_tree.finish_edit()
         if self.busy() or not self.may_discard():
             return
         self.stop_sound()
@@ -696,6 +785,7 @@ class Window(QMainWindow):
         self.update_title()
 
     def open_destination(self):
+        self.destination_tree.finish_edit()
         if self.busy():
             return
         path, _ = QFileDialog.getOpenFileName(
@@ -785,6 +875,7 @@ class Window(QMainWindow):
         }
 
     def save_project(self):
+        self.destination_tree.finish_edit()
         if self.busy():
             return
         path, _ = QFileDialog.getSaveFileName(
@@ -837,6 +928,7 @@ class Window(QMainWindow):
             self.error(exc)
 
     def open_project(self):
+        self.destination_tree.finish_edit()
         if self.busy():
             return
         path, _ = QFileDialog.getOpenFileName(
@@ -912,6 +1004,7 @@ class Window(QMainWindow):
         self.executor.submit(work)
 
     def export(self):
+        self.destination_tree.finish_edit()
         if self.busy():
             return
         if not self.entries:
@@ -1072,6 +1165,7 @@ class Window(QMainWindow):
             super().keyReleaseEvent(event)
 
     def closeEvent(self, event):
+        self.destination_tree.finish_edit()
         if self.busy() or self.pending:
             self.error(
                 self.text(

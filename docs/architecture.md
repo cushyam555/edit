@@ -10,7 +10,11 @@
   then atomically replaced. Input SoundFonts are never opened for writing.
 - `soundfont_edit/preset_tree.py`: numeric tree ordering, display-only GM numbering,
   multi-selection and window-local copy-only drag/drop. Leaf identifiers map back
-  to canonical entries rather than editable QVariant copies.
+  to canonical entries rather than editable QVariant copies. Destination inline
+  editors use a delegate with validated numeric ranges and numbering conversion.
+  Document changes commit synchronously; tree rebuilds wait until Qt closes the
+  editor. Save explicitly finishes a focused edit before taking its snapshot.
+  GM reference cells stay read-only and support clipboard copying.
 - `soundfont_edit/soundset.py`: immutable merge planning, collision replacement or
   remapping, atomic batch cancellation, and source preview address preservation.
 - `soundfont_edit/gm.py`: 128 standard GM program references. Bank 128 is the

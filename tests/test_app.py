@@ -7,8 +7,16 @@ import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch, Mock
-from PySide6.QtCore import QStandardPaths, QMimeData
-from PySide6.QtWidgets import QApplication, QFileDialog, QInputDialog, QMessageBox
+from PySide6.QtCore import QStandardPaths, QMimeData, Qt, QPoint
+from PySide6.QtWidgets import (
+    QApplication,
+    QFileDialog,
+    QInputDialog,
+    QMessageBox,
+    QLineEdit,
+    QSpinBox,
+)
+from PySide6.QtTest import QTest
 from soundfont_edit.app import Window
 from soundfont_edit.preset_tree import PresetTree, MIME
 from soundfont_edit.soundfont import SoundFont, export_sf2
@@ -65,6 +73,145 @@ class AppTests(unittest.TestCase):
         w.source_tree.clearSelection()
         w.source_tree.rows[0].setSelected(True)
         self.app.processEvents()
+
+    def begin_inline(self, column):
+        tree = self.window.destination_tree
+        tree.setFocus()
+        tree.setCurrentItem(tree.rows[0], column)
+        tree.editItem(tree.rows[0], column)
+        self.app.processEvents()
+        kind = QLineEdit if column == 1 else QSpinBox
+        return next(editor for editor in tree.findChildren(kind) if editor.isVisible())
+
+    def test_inline_name_paste_escape_and_immediate_save(self):
+        w = self.window
+        path = self.add_fixture()
+        self.choose_source(path)
+        w.copy_selected()
+        tree = w.destination_tree
+        item = tree.rows[0]
+        # Exercise the real double-click path, not just the document mutation.
+        point = QPoint(
+            tree.header().sectionViewportPosition(1) + 30,
+            tree.visualItemRect(item).center().y(),
+        )
+        QTest.mouseClick(tree.viewport(), Qt.LeftButton, pos=point)
+        QTest.mouseDClick(tree.viewport(), Qt.LeftButton, pos=point)
+        self.app.processEvents()
+        editor = next(e for e in tree.findChildren(QLineEdit) if e.isVisible())
+        QApplication.clipboard().setText("Pasted GM name")
+        editor.selectAll()
+        QTest.keyClick(editor, Qt.Key_V, Qt.ControlModifier)
+        QTest.keyClick(editor, Qt.Key_Return)
+        # Save before servicing refresh timers: document edits must be synchronous.
+        project = self.folder / "inline.sfedit"
+        with patch.object(
+            QFileDialog, "getSaveFileName", return_value=(str(project), "")
+        ):
+            w.save_project()
+        self.assertEqual(
+            json.loads(project.read_text("utf-8"))["entries"][0]["name"],
+            "Pasted GM name",
+        )
+        self.app.processEvents()
+        editor = self.begin_inline(1)
+        editor.selectAll()
+        QTest.keyClicks(editor, "Cancelled")
+        QTest.keyClick(editor, Qt.Key_Escape)
+        self.app.processEvents()
+        self.assertEqual(w.entries[0]["name"], "Pasted GM name")
+        self.assertFalse(w.dirty)
+        self.assertEqual(self.errors, [])
+        editor = self.begin_inline(1)
+        editor.selectAll()
+        QTest.keyClicks(editor, "Saved while focused")
+        with patch.object(
+            QFileDialog, "getSaveFileName", return_value=(str(project), "")
+        ):
+            w.save_project()
+        self.assertEqual(
+            json.loads(project.read_text("utf-8"))["entries"][0]["name"],
+            "Saved while focused",
+        )
+        self.app.processEvents()
+
+    def test_inline_bank_id_numbering_and_original_preview(self):
+        w = self.window
+        path = self.add_fixture()
+        self.choose_source(path)
+        w.copy_selected()
+        editor = self.begin_inline(2)
+        editor.setValue(3)
+        QTest.keyClick(editor, Qt.Key_Return)
+        self.app.processEvents()
+        self.assertEqual(w.entries[0]["bank"], 3)
+        w.numbering.setChecked(True)
+        editor = self.begin_inline(0)
+        self.assertEqual((editor.minimum(), editor.maximum()), (1, 128))
+        editor.setValue(34)
+        QTest.keyClick(editor, Qt.Key_Return)
+        self.app.processEvents()
+        self.assertEqual(w.entries[0]["program"], 33)
+        self.assertEqual(w.destination_tree.rows[0].text(0), "034")
+        self.assertEqual(w.destination_tree.rows[0].text(3), "Electric Bass (finger)")
+        self.assertEqual(
+            (w.entries[0]["source_bank"], w.entries[0]["source_program"]), (0, 0)
+        )
+        w.player.select = Mock()
+        w.player.on = Mock()
+        w.note_on(60)
+        w.player.select.assert_called_with(str(path), 0, 0, drums=False)
+        self.assertEqual(self.errors, [])
+
+    def test_gm_copy_keyboard_and_apply_names(self):
+        w = self.window
+        path = self.add_fixture()
+        self.choose_source(path)
+        w.copy_selected()
+        tree = w.destination_tree
+        tree.setCurrentItem(tree.rows[0], 3)
+        QTest.keyClick(tree, Qt.Key_C, Qt.ControlModifier)
+        self.assertEqual(QApplication.clipboard().text(), "Acoustic Grand Piano")
+        w.use_gm_names()
+        self.assertEqual(w.entries[0]["name"], "Acoustic Grand Piano")
+        self.assertEqual(tree.rows[0].text(3), "Acoustic Grand Piano")
+        self.assertIsNone(
+            tree.itemDelegate().createEditor(
+                tree.viewport(), None, tree.indexFromItem(tree.rows[0], 3)
+            )
+        )
+        source = w.source_tree
+        source.setCurrentItem(source.rows[0], 2)
+        QApplication.clipboard().setText("stale")
+        QTest.keyClick(source, Qt.Key_C, Qt.ControlModifier)
+        self.assertEqual(QApplication.clipboard().text(), "Acoustic Grand Piano")
+        self.assertEqual(self.errors, [])
+
+    def test_inline_conflict_cancel_replace_and_empty_name(self):
+        w = self.window
+        a = self.add_fixture("A")
+        b = self.add_fixture("B", program=1)
+        self.choose_source(a)
+        w.copy_selected()
+        self.choose_source(b)
+        w.copy_selected()
+        key = w.entries[0]["_uid"]
+        before = [dict(e) for e in w.entries]
+        with patch.object(w, "resolve_collision", return_value=("cancel", None)):
+            w.edit_destination_cell(key, 0, 1)
+        self.assertEqual(w.entries, before)
+        w.edit_destination_cell(key, 1, "  ")
+        self.assertEqual(w.entries, before)
+        self.assertTrue(self.errors)
+        self.errors.clear()
+        with patch.object(w, "resolve_collision", return_value=("replace", None)):
+            w.edit_destination_cell(key, 0, 1)
+        self.app.processEvents()
+        self.assertEqual(len(w.entries), 1)
+        self.assertEqual(w.entries[0]["path"], str(a))
+        self.assertEqual(w.entries[0]["program"], 1)
+        self.assertEqual(w.entries[0]["source_program"], 0)
+        self.assertEqual(self.errors, [])
 
     def test_copy_edit_and_project_roundtrip(self):
         w = self.window
