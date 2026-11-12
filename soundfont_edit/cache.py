@@ -1,5 +1,6 @@
 """Persist metadata only; sound samples stay in their source files."""
 
+from contextlib import closing
 import json
 import sqlite3
 from pathlib import Path
@@ -9,7 +10,7 @@ from .soundfont import SoundFont
 def read_presets(path, cache_path):
     source = Path(path)
     stat = source.stat()
-    with sqlite3.connect(cache_path) as db:
+    with closing(sqlite3.connect(cache_path)) as db, db:
         db.execute(
             "CREATE TABLE IF NOT EXISTS presets (path TEXT PRIMARY KEY, size INTEGER, mtime INTEGER, data TEXT)"
         )
