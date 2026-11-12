@@ -9,6 +9,7 @@ from PySide6.QtCore import (
     QModelIndex,
     QEvent,
     QRect,
+    QLocale,
 )
 from PySide6.QtGui import QDrag, QKeySequence
 from PySide6.QtWidgets import (
@@ -42,6 +43,7 @@ class PresetDelegate(QStyledItemDelegate):
             editor = QLineEdit(parent)
         else:
             editor = QSpinBox(parent)
+            editor.setLocale(QLocale.c())
             offset = int(tree.gm_numbers) if index.column() == 0 else 0
             editor.setProperty("numbering_offset", offset)
             (

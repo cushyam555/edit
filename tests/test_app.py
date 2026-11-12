@@ -7,7 +7,7 @@ import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch, Mock
-from PySide6.QtCore import QStandardPaths, QMimeData, Qt, QPoint
+from PySide6.QtCore import QStandardPaths, QMimeData, Qt, QPoint, QLocale, QTimer
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QLineEdit,
     QSpinBox,
+    QMenu,
 )
 from PySide6.QtTest import QTest
 from soundfont_edit.app import Window
@@ -216,6 +217,68 @@ class AppTests(unittest.TestCase):
         self.assertEqual(w.entries[0]["program"], 1)
         self.assertEqual(w.entries[0]["source_program"], 0)
         self.assertEqual(self.errors, [])
+
+    def test_context_delete_multiselect_and_clicked_row(self):
+        w = self.window
+        a = self.add_fixture("A")
+        b = self.add_fixture("B", program=1)
+        self.choose_source(a)
+        w.copy_selected()
+        self.choose_source(b)
+        w.copy_selected()
+        tree = w.destination_tree
+
+        def delete():
+            menu = next(
+                menu
+                for menu in self.app.topLevelWidgets()
+                if isinstance(menu, QMenu) and menu.isVisible()
+            )
+            action = next(
+                action
+                for action in menu.actions()
+                if action.text() == "ลบเสียงที่เลือก"
+            )
+            self.assertTrue(action.isEnabled())
+            action.trigger()
+            menu.close()
+
+        # Right-clicking a different row deletes the clicked preset, not a stale selection.
+        tree.setCurrentItem(tree.rows[0])
+        point = tree.visualItemRect(tree.rows[1]).center()
+        QTimer.singleShot(0, delete)
+        w.destination_context(point)
+        self.assertEqual([e["name"] for e in w.entries], ["A"])
+        self.choose_source(b)
+        w.copy_selected()
+        tree.selectAll()
+        point = tree.visualItemRect(tree.rows[0]).center()
+        QTimer.singleShot(0, delete)
+        w.destination_context(point)
+        self.assertEqual(w.entries, [])
+        self.assertTrue(w.dirty)
+        self.assertEqual(self.errors, [])
+
+    def test_ascii_digits_despite_non_latin_system_locale(self):
+        previous = QLocale()
+        try:
+            QLocale.setDefault(QLocale("ar_EG"))
+            other = Window()
+            other.meta = {"favorites": [], "tags": {}}
+            self.assertEqual(other.locale().zeroDigit(), "0")
+            self.assertEqual(
+                [spin.text() for spin in other.findChildren(QSpinBox)], ["100"]
+            )
+            other.close()
+            path = self.add_fixture()
+            self.choose_source(path)
+            self.window.copy_selected()
+            editor = self.begin_inline(0)
+            editor.setValue(127)
+            self.assertEqual(editor.text(), "127")
+            QTest.keyClick(editor, Qt.Key_Escape)
+        finally:
+            QLocale.setDefault(previous)
 
     def test_copy_edit_and_project_roundtrip(self):
         w = self.window

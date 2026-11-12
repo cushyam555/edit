@@ -6,7 +6,7 @@ import sys
 import uuid
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
-from PySide6.QtCore import Qt, QTimer, Signal, QObject, QStandardPaths
+from PySide6.QtCore import Qt, QTimer, Signal, QObject, QStandardPaths, QLocale
 from PySide6.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -48,6 +48,7 @@ class Signals(QObject):
 class Window(QMainWindow):
     def __init__(self):
         super().__init__()
+        self.setLocale(QLocale.c())
         self.resize(1500, 940)
         self.library = []
         self.entries = []
@@ -91,7 +92,7 @@ class Window(QMainWindow):
         self.setCentralWidget(root)
         layout = QVBoxLayout(root)
         layout.setSpacing(12)
-        brand = QLabel("♫  SoundFont Edit Studio 0.2.1")
+        brand = QLabel("♫  SoundFont Edit Studio 0.2.2")
         brand.setStyleSheet("font-size:24px;font-weight:600;color:#087e73;padding:6px")
         toolbar = QHBoxLayout()
         layout.addLayout(toolbar)
@@ -176,11 +177,6 @@ class Window(QMainWindow):
         dv.addWidget(self.destination_count)
         controls = QHBoxLayout()
         dv.addLayout(controls)
-        self.rename_button = self.button(controls, "เปลี่ยนชื่อ", "Rename", self.rename)
-        self.slot_button = self.button(
-            controls, "Bank / ID", "Bank / ID", self.change_slot
-        )
-        self.remove_button = self.button(controls, "นำออก", "Remove", self.remove)
         controls.addStretch()
         self.export_button = self.button(
             controls, "บันทึกเป็น SF2 ใหม่", "Save as new SF2", self.export, True
@@ -239,9 +235,6 @@ class Window(QMainWindow):
             self.copy_button,
             self.new_button,
             self.open_target_button,
-            self.rename_button,
-            self.slot_button,
-            self.remove_button,
             self.destination_tree,
             self.project_open,
             self.project_save,
@@ -320,7 +313,7 @@ class Window(QMainWindow):
 
     def update_title(self):
         self.setWindowTitle(
-            "SoundFont Edit Studio 0.2.1" + (" *" if self.dirty else "")
+            "SoundFont Edit Studio 0.2.2" + (" *" if self.dirty else "")
         )
 
     def busy(self):
@@ -514,6 +507,13 @@ class Window(QMainWindow):
         menu.exec(self.source_tree.viewport().mapToGlobal(pos))
 
     def destination_context(self, pos):
+        item = self.destination_tree.itemAt(pos)
+        if item is None or item.data(0, ROLE) not in self.destination_tree.entry_map:
+            return
+        if not item.isSelected():
+            self.destination_tree.clearSelection()
+            self.destination_tree.setCurrentItem(item)
+            item.setSelected(True)
         if not self.destination_tree.selected_entries():
             return
         menu = QMenu(self)
@@ -525,6 +525,11 @@ class Window(QMainWindow):
             self.use_gm_names,
         )
         use.setEnabled(not self.busy())
+        menu.addSeparator()
+        delete = menu.addAction(
+            self.text("ลบเสียงที่เลือก", "Delete selected presets"), self.remove
+        )
+        delete.setEnabled(not self.busy())
         menu.exec(self.destination_tree.viewport().mapToGlobal(pos))
 
     def use_gm_names(self):
@@ -1188,6 +1193,7 @@ class Window(QMainWindow):
 
 
 def main():
+    QLocale.setDefault(QLocale.c())
     app = QApplication(sys.argv)
     app.setApplicationName("SoundFont Edit Studio")
     window = Window()
