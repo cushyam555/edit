@@ -4,8 +4,13 @@
   project JSON, MIDI polling and conflict dialogs. Library scans and exports share one worker
   to keep large file operations off the GUI thread.
 - `soundfont_edit/soundfont.py`: bounded RIFF chunk iteration, SoundFont preset
-  metadata, SF2 merge/export. Preset bags are copied selectively; complete source
-  instrument/sample pools are copied once per source and references are rebased.
+  metadata, dependency-pruned SF2 merge/export. Traverse selected preset zones to
+  instruments and samples, close stereo links, retain global zones/modulators,
+  and preserve signed fine/coarse address offsets. Copy only referenced PCM
+  intervals with guard points, remapping sample IDs, instrument IDs and addresses.
+  Metadata reads seek past PCM; final writes stream 1 MiB blocks from each source.
+  Shared headers and overlapping audio ranges within a source are emitted once.
+  Source size/mtime are checked before and after copying.
   Outputs are written beside the destination, reopened for structural checking,
   then atomically replaced. Input SoundFonts are never opened for writing.
 - `soundfont_edit/preset_tree.py`: numeric tree ordering, display-only GM numbering,
@@ -54,5 +59,5 @@ are never sent to a server. The app performs no network requests.
 
 ## Next phase
 
-Sample dependency pruning and deduplication, compressed SF3 decoding/export,
+Cross-file content deduplication, compressed SF3 decoding/export,
 remaining localization, undo/redo, and advanced sample/loop/envelope/filter editing.

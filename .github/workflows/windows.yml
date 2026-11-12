@@ -34,5 +34,5 @@ jobs:
           Stop-Process -Id $process.Id
       - uses: actions/upload-artifact@v4
         with:
-          name: SoundFont-Edit-Studio-0.2.2-Windows
+          name: SoundFont-Edit-Studio-0.2.3-Windows
           path: dist/SoundFont-Edit-Studio

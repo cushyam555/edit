@@ -92,7 +92,7 @@ class Window(QMainWindow):
         self.setCentralWidget(root)
         layout = QVBoxLayout(root)
         layout.setSpacing(12)
-        brand = QLabel("♫  SoundFont Edit Studio 0.2.2")
+        brand = QLabel("♫  SoundFont Edit Studio 0.2.3")
         brand.setStyleSheet("font-size:24px;font-weight:600;color:#087e73;padding:6px")
         toolbar = QHBoxLayout()
         layout.addLayout(toolbar)
@@ -313,7 +313,7 @@ class Window(QMainWindow):
 
     def update_title(self):
         self.setWindowTitle(
-            "SoundFont Edit Studio 0.2.2" + (" *" if self.dirty else "")
+            "SoundFont Edit Studio 0.2.3" + (" *" if self.dirty else "")
         )
 
     def busy(self):
@@ -1050,8 +1050,8 @@ class Window(QMainWindow):
             )
             return
         summary = self.text(
-            f"บันทึก {len(self.entries)} เสียงเป็น SF2 ใหม่?\nเก็บ instrument/sample จากไฟล์ที่ใช้ทั้งหมด\nชื่อ SF2 ใช้ ASCII สูงสุด 19 ตัวอักษร",
-            f"Save {len(self.entries)} presets as a new SF2?\nAll source instruments/samples are retained.\nSF2 names use up to 19 ASCII characters.",
+            f"บันทึก {len(self.entries)} เสียงเป็น SF2 ใหม่?\nเก็บเฉพาะ instrument/sample ที่เสียงที่เลือกใช้\nชื่อ SF2 ใช้ ASCII สูงสุด 19 ตัวอักษร",
+            f"Save {len(self.entries)} presets as a new SF2?\nOnly instruments/samples needed by selected presets are copied.\nSF2 names use up to 19 ASCII characters.",
         )
         if QMessageBox.question(self, "Save SF2", summary) != QMessageBox.Yes:
             return
